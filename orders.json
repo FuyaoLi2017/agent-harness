@@ -1,0 +1,21 @@
+{
+  "customer_id": "CUST-001",
+  "as_of": "2026-11-24",
+  "orders": [
+    {
+      "order_id": "ORD-1001",
+      "customer_id": "CUST-001",
+      "status": "delivered",
+      "delivered_on": "2026-11-14",
+      "payment_ref": "synthetic-payment-001",
+      "items": [
+        {
+          "item_id": "ITEM-001",
+          "name": "Ceramic Mug",
+          "price_cents": 2500
+        }
+      ],
+      "refunded_item_ids": []
+    }
+  ]
+}
