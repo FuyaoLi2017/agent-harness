@@ -16,6 +16,21 @@
         }
       ],
       "refunded_item_ids": []
+    },
+    {
+      "order_id": "ORD-1002",
+      "customer_id": "CUST-001",
+      "status": "pending",
+      "delivered_on": null,
+      "payment_ref": "synthetic-payment-002",
+      "items": [
+        {
+          "item_id": "ITEM-002",
+          "name": "Cotton Tote",
+          "price_cents": 1800
+        }
+      ],
+      "refunded_item_ids": []
     }
   ]
 }
