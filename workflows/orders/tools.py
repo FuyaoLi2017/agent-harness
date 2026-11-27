@@ -1,11 +1,12 @@
 """Tools for the synthetic order-support example."""
 
 import json
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
-from anthropic.types import ToolParam
+from workflow import ToolOutcome
 
 
 class OrderItem(TypedDict):
@@ -28,59 +29,6 @@ class OrderFixture(TypedDict):
     customer_id: str
     as_of: str
     orders: list[Order]
-
-
-GET_ORDER_TOOL: ToolParam = {
-    "name": "get_order",
-    "description": "Look up the current customer's order by ID, including its status and items.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "order_id": {
-                "type": "string",
-                "description": "The order ID, such as ORD-1001.",
-                "minLength": 1,
-            },
-        },
-        "required": ["order_id"],
-        "additionalProperties": False,
-    },
-}
-
-CANCEL_ORDER_TOOL: ToolParam = {
-    "name": "cancel_order",
-    "description": "Cancel the current customer's pending order by ID.",
-    "input_schema": GET_ORDER_TOOL["input_schema"],
-}
-
-ISSUE_REFUND_TOOL: ToolParam = {
-    "name": "issue_refund",
-    "description": "Simulate refunding eligible items to the order's original payment method.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "order_id": {"type": "string", "minLength": 1},
-            "item_ids": {
-                "type": "array",
-                "description": "Distinct item IDs from the delivered order.",
-                "items": {"type": "string", "minLength": 1},
-                "minItems": 1,
-                "uniqueItems": True,
-            },
-        },
-        "required": ["order_id", "item_ids"],
-        "additionalProperties": False,
-    },
-}
-
-TOOLS: list[ToolParam] = [GET_ORDER_TOOL, CANCEL_ORDER_TOOL, ISSUE_REFUND_TOOL]
-
-
-def load_orders() -> OrderFixture:
-    """Load fresh synthetic order data for one run."""
-    fixture_path = Path(__file__).with_name("orders.json")
-    with fixture_path.open(encoding="utf-8") as fixture_file:
-        return cast(OrderFixture, json.load(fixture_file))
 
 
 def _error(code: str, message: str) -> dict[str, object]:
@@ -176,23 +124,29 @@ def issue_refund(
     }
 
 
-def execute_tool(
-    orders: OrderFixture, name: str, arguments: object
-) -> dict[str, object]:
-    """Validate the tool arguments and dispatch an allowlisted handler."""
-    if name not in ("get_order", "cancel_order", "issue_refund"):
-        return _error("unknown_tool", "Tool is unavailable.")
-    if not isinstance(arguments, dict):
-        return _error("invalid_arguments", "Tool arguments must be a JSON object.")
+def open_handlers() -> dict[str, Callable[[dict[str, object]], ToolOutcome]]:
+    """Bind each order tool to the same fresh session fixture."""
+    fixture_path = Path(__file__).with_name("orders.json")
+    with fixture_path.open(encoding="utf-8") as fixture_file:
+        orders = cast(OrderFixture, json.load(fixture_file))
 
-    required_fields = {"order_id", "item_ids"} if name == "issue_refund" else {"order_id"}
-    if arguments.keys() != required_fields:
-        field_names = " and ".join(sorted(required_fields))
-        return _error("invalid_arguments", f"{name} accepts exactly {field_names}.")
+    def bind(
+        handler: Callable[..., dict[str, object]], name: str, required_fields: set[str]
+    ) -> Callable[[dict[str, object]], ToolOutcome]:
+        def execute(arguments: dict[str, object]) -> ToolOutcome:
+            if not isinstance(arguments, dict):
+                content = _error("invalid_arguments", "Tool arguments must be a JSON object.")
+            elif arguments.keys() != required_fields:
+                field_names = " and ".join(sorted(required_fields))
+                content = _error("invalid_arguments", f"{name} accepts exactly {field_names}.")
+            else:
+                content = handler(orders, **arguments)
+            return ToolOutcome(content=content, is_error="error" in content)
 
-    order_id = arguments["order_id"]
-    if name == "issue_refund":
-        return issue_refund(orders, order_id, arguments["item_ids"])
-    if name == "cancel_order":
-        return cancel_order(orders, order_id)
-    return get_order(orders, order_id)
+        return execute
+
+    return {
+        "get_order": bind(get_order, "get_order", {"order_id"}),
+        "cancel_order": bind(cancel_order, "cancel_order", {"order_id"}),
+        "issue_refund": bind(issue_refund, "issue_refund", {"order_id", "item_ids"}),
+    }

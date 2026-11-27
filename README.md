@@ -1,62 +1,68 @@
-# agent-harness
+# Agent Harness
 
-A small Python agent runtime for synthetic retail order support. The first milestone is a Claude tool loop with a per-run JSONL trace. The roadmap adds replay, regression evals, and crash recovery for actions such as refunds.
+Agent Harness is a small Python runtime for tool-using agents. It records model responses and tool outcomes as JSONL, replays runs offline, and estimates token costs. Synthetic order management is the included workflow.
 
-## Development setup
+## Try offline replay
 
-Install `uv`, then run these commands from the repository root to sync the Python 3.12 environment. [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/)
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and run these commands from the repository root. Replay uses the checked-in synthetic recordings and requires no API key.
 
 ```sh
 uv sync --locked
-uv run --locked python -c 'import anthropic; print(anthropic.__version__)'
+uv run --locked python loop.py --replay tests/fixtures/orders-session
 ```
 
-## Run the v0.1 demo
+```text
+I issued a simulated $25.00 refund for the mug.
+The mug has already been refunded, so no additional refund was issued.
+```
 
-In the Claude Console, select **Create key**, enter a name and expiration, set **Linked account** to yourself, and select a workspace to scope the personal key to. Copy the key when it appears. [Claude Console API keys](https://platform.claude.com/settings/keys) · [Claude API key guide](https://platform.claude.com/docs/en/get-api-key)
+To replay a standalone prompt with several model requests, pass its JSONL file.
 
-Live requests use your Console organization’s API billing or available credits. [Claude API billing](https://support.claude.com/en/articles/8977456-how-do-i-pay-for-my-claude-api-usage)
+```sh
+uv run --locked python loop.py --replay tests/fixtures/orders-single.jsonl
+```
 
-In the zsh terminal where you’ll run the demo, paste the key at the hidden prompt and press Enter. You can also have your credential manager set `ANTHROPIC_API_KEY` for that shell.
+Replay runs the workflow’s tools on fresh local state and verifies the tool results and outcome of each prompt. The CLI prints answers on stdout and new trace paths, token counts, and estimated original costs on stderr. Replay incurs no model charges.
+
+```mermaid
+flowchart LR
+    Live[Claude Messages API] --> Loop[Agent loop]
+    Replay[Recorded model responses] --> Loop
+    Workflow[Workflow JSON and Python handlers] --> Loop
+    Loop --> Result[Answers]
+    Loop --> Trace[(Per-prompt JSONL)]
+    Trace --> Usage[Token totals and cost estimate]
+```
+
+## Run interactively with Claude
+
+Create a personal Claude API key in the console and scope it to your workspace. Live requests use your organization’s API billing or credits. [Claude Console API keys](https://platform.claude.com/settings/keys) · [Claude API key guide](https://platform.claude.com/docs/en/get-api-key)
+
+With zsh, enter the key at a hidden prompt. You can also have your credential manager set `ANTHROPIC_API_KEY`.
 
 ```zsh
 read -rs 'ANTHROPIC_API_KEY?Anthropic API key: '
 printf '\n'
 export ANTHROPIC_API_KEY
+uv run --locked python loop.py --workflow orders
 ```
 
-From the repository root, start the interactive agent.
-
-```sh
-uv run --locked python loop.py
-```
-
-Try this exchange. Claude’s wording may vary.
-
-```text
-Synthetic order support. Type exit or press Ctrl-D to quit.
-You> Please refund the mug from order ORD-1001.
-Agent> I issued a simulated $25.00 refund for the mug.
-You> Please refund it again.
-Agent> The mug has already been refunded, so no additional refund was issued.
-You> exit
-```
-
-Each task prompt gets up to eight Claude requests and its own JSONL trace under `runs/`. The CLI prints the answer to stdout and the trace path to stderr. The session remembers completed conversation turns and synthetic order changes, so the second request can refer to the mug and the store rules prevent a duplicate refund. Each new process starts with fresh synthetic orders.
-
-Type `exit` or press Ctrl-D to close the session. Ctrl-C interrupts it. A quoted task runs once. Both modes default to Claude Haiku 5.5 (`claude-haiku-5-5`) and accept a `--model` override.
+Ask `Please refund the mug from order ORD-1001.`, then `Please refund it again.` Type `exit` or press Ctrl-D to finish recording the session. To replay it, pass the directory containing both JSONL files and its `session.json` manifest, printed as the parent of each run trace path. A standalone prompt writes one file directly under `runs/`.
 
 ```sh
 uv run --locked python loop.py 'Please refund the mug from order ORD-1001.'
 ```
 
-## Read the code
+The defaults are `--workflow orders` and `--model claude-haiku-5-5`. Live sessions retain completed conversation turns and local tool effects across prompts. Each prompt has an eight-request budget. Keep live trace data local, and use synthetic inputs for recordings you intend to share.
 
-- Follow the CLI from argument parsing through model requests, tool results, and JSONL events. [loop.py](loop.py)
-- See the tool schemas and the store rules for order lookup, cancellation, and refunds. [tools.py](tools.py)
-- Inspect the synthetic orders, customer identity, and reference date for the refund window. [orders.json](orders.json)
+## Add a workflow
 
-## Design
+Use the [order workflow definition](workflows/orders/workflow.json) as the format for a workflow ID, version, display name, system prompt, and tool schemas. Implement a Python factory that opens fresh workflow state and returns a handler for each advertised tool. Handlers return a JSON payload and an explicit error flag. Register the definition and factory under their ID and version in the [workflow catalog](workflows/__init__.py). The CLI selects the latest registered version for live runs and the recorded version for replay.
 
-- [Architecture and release roadmap](designs/architecture.md)
-- [v0.1 CLI and run trace](designs/v0.1.md)
+The [V0.2 design](designs/v0.2.md) documents trace fields, replay rules, and pricing. See the [architecture and roadmap](designs/architecture.md) for later milestones.
+
+## Run the tests
+
+```sh
+uv run --locked python -m unittest discover -s tests -v
+```

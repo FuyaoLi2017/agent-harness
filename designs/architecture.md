@@ -1,6 +1,6 @@
 # Agent Harness Architecture
 
-Agent Harness is a small Python runtime that shows which tools an agent called, how much the run cost, and how execution can recover after a crash. Its online store example looks up orders, cancels pending orders, and refunds eligible items using synthetic data.
+Agent Harness is a small Python runtime for tool-using agents. Workflows define their own instructions, tools, and state. The included order management workflow looks up orders, cancels pending orders, and refunds eligible items using synthetic data.
 
 ## Runtime and run history
 
@@ -10,7 +10,8 @@ The [v0.1 design](v0.1.md) starts with a synchronous loop using the Anthropic SD
 flowchart LR
     Request[CLI request] --> Loop[Agent loop]
     Loop <--> Model[Anthropic Messages API]
-    Loop <--> Tools[Synthetic order tools]
+    Replay[Recorded model responses] --> Loop
+    Loop <--> Tools[Workflow tools]
     Loop --> Log[(Append-only JSONL run log)]
     Log -.-> Cost[Usage and cost · v0.2]
     Log -.-> Evals[Outcome and trajectory evals · v0.3]
@@ -19,14 +20,14 @@ flowchart LR
 
 In v0.1, each log is a trace of one run. The live conversation and fixture state are held in memory. Appending events preserves their order and gives later milestones a common record for usage, tool trajectories, and recovery. v0.4 adds the durability guarantees and event data required to reconstruct execution state from that history. The tool ledger records the actual refund effects and supports reconciliation when the run trace has an incomplete write.
 
-Keeping the first loop direct makes the provider protocol, tool dispatch, and stop conditions visible in one place. Introduce a narrow provider interface when recorded responses need it. A neutral message model can wait for a second live provider, and a tool registry can wait for another example or a need for shared policy metadata. The local log and refund ledger keep the later recovery mechanism small enough to demonstrate without a workflow server.
+In [V0.2](v0.2.md), the loop takes a model-response callable and a workflow session. Live and recorded requests share the loop. The CLI binds workflow metadata to Python handlers that own local state. A neutral message model can wait for a second live provider. The local log and refund ledger keep the later recovery mechanism small enough to demonstrate without a workflow server.
 
 ## Milestones
 
 | Version | Deliverable | Acceptance |
 | --- | --- | --- |
 | v0.1 | Anthropic loop, three order tools, a turn limit, and per-run JSONL | One synthetic support request completes from the CLI and leaves a readable trace. |
-| v0.2 | Recorded-response replay, offline CI, per-run token and cost totals, and a README diagram | Public release after the publication review. CI runs without model credentials or provider network access. Usage totals come from response events and cost uses a dated model price table. |
+| v0.2 | Generic workflow interface, standalone and session replay, offline CI, per-run usage and cost, and a README diagram | Public release after the publication review. CI runs without model credentials or provider network access. Usage totals come from response events and cost uses a dated model price table. |
 | v0.3 | Ten retail eval cases with deterministic answer and tool-trajectory checks | One command reports pass rate and cost. Cases cover successful actions and policy rejections, and scorers check tool order and forbidden calls where relevant. |
 | v0.4 | Bounded provider retries, human approval for large refunds, resume, and at-most-once refunds | Kill the process after a synthetic refund is committed and before its tool result is recorded. Resume the run and verify that the ledger contains one refund. |
 
